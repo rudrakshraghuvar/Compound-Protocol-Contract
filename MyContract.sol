@@ -66,9 +66,9 @@ contract MyContract {
 
     mapping(address => mapping(uint256 => uint256)) public cUSDTBalance;
 
-    uint256 public rateOfOneNFT = 10;
+    uint256 public rateOfOneNFT = 1;
 
-    uint256 public totalSupply = 0;
+    uint256 private _totalSupply;
 
     constructor(
         address _usdtTokenAddress,
@@ -109,7 +109,7 @@ contract MyContract {
             "Approval failed"
         );
         uint256 previousBal = cUSDToken.balanceOf(address(this));
-        require(cUSDToken.mint(USDTtoken) == 0, "Minting cUSDT failed");
+        require(cUSDToken.mint(rateOfOneNFT*1e6) == 0, "Minting cUSDT failed");
         uint256 currentBal = cUSDToken.balanceOf(address(this));
         _tokenIdCounter.increment();
         uint256 tokenId = _tokenIdCounter.current();
@@ -118,7 +118,7 @@ contract MyContract {
         string memory uri = string(abi.encodePacked("https://gateway.pinata.cloud/ipfs/QmbA2TGPiGSeyLwmCffEqhfjNhX6XJaS88ExywgQbgnaJP/",
             Strings.toString(tokenId),".json"));
         _setTokenURI(tokenId, uri);
-        totalSupply += rateOfOneNFT*1e6;
+        _totalSupply += (rateOfOneNFT*1e6);
     }
 
     function tokenURI(uint256 tokenId) public view returns (string memory) {
@@ -126,13 +126,17 @@ contract MyContract {
         return _tokenURIs[tokenId];
     }
 
-    function nftIdOwnerHave(uint256 tokenId) public view returns(bool) {
-        return _nftIdOwnerHave[msg.sender][tokenId];
+    function nftIdOwnerHave(address to, uint256 tokenId) public view returns(bool) {
+        return _nftIdOwnerHave[to][tokenId];
     }
 
     function ownerOf(uint256 tokenId) public view returns(address) {
         require(_tokenIdCounter.current() >= tokenId, "Id does not exists");
         return _owners[tokenId];
+    }
+
+    function totalSupply() public view returns(uint256) {
+        return _totalSupply;
     }
 
     function _burn(address to, uint256 tokenId) internal virtual {
@@ -146,30 +150,32 @@ contract MyContract {
         if (bytes(_tokenURIs[tokenId]).length != 0) {
             delete _tokenURIs[tokenId];
         }
+        _nftIdOwnerHave[to][tokenId] = false;
     }
 
     function withdrawToken(uint256 tokenId) public {
         require(_balances[msg.sender] >= 1, "No NFT");
-        require(_nftIdOwnerHave[msg.sender][tokenId] == true, "Not Own this TokenId");
+        require(_nftIdOwnerHave[msg.sender][tokenId] == true, "Not Own this tokenId");
         _burn(msg.sender, tokenId);
         // compound protocol logic
         // to redeem token with interest accured by the cToken in this contract 
         require(
-            cUSDToken.redeemUnderlying(cUSDTBalance[msg.sender][tokenId]) == 0,
+            cUSDToken.redeem(cUSDTBalance[msg.sender][tokenId]) == 0,
             "Redeem cUSDT failed"
         );
         cUSDTBalance[msg.sender][tokenId] = 0;
         require(USDToken.balanceOf(address(this)) >= rateOfOneNFT*1e6, "Contact to the Admin");
         USDToken.transfer(msg.sender, rateOfOneNFT*1e6);
-        totalSupply -= rateOfOneNFT*1e6;
+        _totalSupply -= (rateOfOneNFT*1e6);
     }
 
     function contractUSDToken() view public returns(uint256) {
-        return USDToken.balanceOf(address(this)) - totalSupply;
+        require(USDToken.balanceOf(address(this)) >= _totalSupply, "No Balance");
+        return USDToken.balanceOf(address(this)) - _totalSupply;
     }
 
     function withdrawOnlyOwner(uint256 amount) public onlyOwner {
-        require(USDToken.balanceOf(address(this)) - totalSupply >= amount, "Not enough tokens");
+        require(USDToken.balanceOf(address(this)) >= _totalSupply + amount, "Not enough tokens");
         USDToken.transfer(msg.sender, amount);
     }
 }
